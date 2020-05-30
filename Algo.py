@@ -27,6 +27,11 @@ class Bandit:
             self.crt_rwd = torch.zeros((self.R, self.N), dtype=torch.float)
             self.crt_act = -torch.ones((self.R, self.N), dtype=torch.int)
 
+    def normal_rwd(self):
+        act_mean = torch.Tensor([0,0])
+        self.crt_rwd[self.crt_act == 0] = self.rand_temp[self.crt_act == 0].normal_(0, 1)
+        self.crt_rwd[self.crt_act == 1] = self.rand_temp[self.crt_act == 1].normal_(1, 1)
+
     def first_step(self):
         self.rand_temp.uniform_(to=self.num_act)
         self.crt_act = self.rand_temp.floor().type(torch.int)
