@@ -89,7 +89,6 @@ class Bandit:
     def greedy(self):
         if self.acu_mean.is_cuda:
             p_one_better = torch.zeros(self.R).cuda()
-            self.one_better = p_one_better
             p_one_better[self.acu_mean.argmax(dim=1) == 1] = 1 - self.clip
             p_one_better[self.acu_mean.argmax(dim=1) == 0] = self.clip
         else:
@@ -117,5 +116,6 @@ class Bandit:
         self.sigma_hat_square = ((total_rwd - total_act * self.acu_mean[:,1].reshape((self.R, 1, 1)) -
                                 (1 - total_act) * self.acu_mean[:, 0].reshape((self.R, 1, 1))) ** 2
                                  ).sum(dim=(1, 2)) / (self.T * self.N - 2)
+        # self.sigma_hat_square[:] = 1 #known variance
         self.diff = (self.acu_mean[:, 1] - self.acu_mean[:, 0])/self.sigma_hat_square.sqrt()/ (
                 1 / self.acu_obs).sum(dim=(1)).sqrt()
