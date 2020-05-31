@@ -89,13 +89,14 @@ class Bandit:
     def greedy(self):
         if self.acu_mean.is_cuda:
             p_one_better = torch.zeros(self.R).cuda()
+            self.one_better = p_one_better
             p_one_better[self.acu_mean.argmax(dim=1) == 1] = 1 - self.clip
             p_one_better[self.acu_mean.argmax(dim=1) == 0] = self.clip
-            return
         else:
             p_one_better = torch.zeros(self.R)
             p_one_better[self.acu_mean.argmax(dim=1) == 1] = 1 - self.clip
             p_one_better[self.acu_mean.argmax(dim=1) == 0] = self.clip
+
         return p_one_better
 
     def regular_est(self):
