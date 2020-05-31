@@ -11,11 +11,12 @@ class Bandit:
         # N: batch size; T: batch number; R: replication number; clip: clip probability
         if params is None:
             params = {'N': 15, 'T': 25, 'R': 10000, 'mean_reward': [0, 0], 'var_reward': [1, 1],
-                      'clip': 0.1}
+                      'clip': 0.1, 'algo': 'thompson'}
         self.N = params['N']
         self.T = params['T']
         self.R = params['R']
         self.clip = params['clip']
+        self.algo = params['algo']
         self.mean_rwd_env = torch.tensor(params['mean_reward'], dtype=torch.float)
         self.var_rwd_env = torch.tensor(params['var_reward'], dtype=torch.float)
         self.num_act_env = len(self.mean_rwd_env)
@@ -60,7 +61,13 @@ class Bandit:
         self.normal_rwd()
 
     def step(self):
-        p_one_better = self.thompson()
+        if self.algo == 'thompson':
+            p_one_better = self.thompson()
+        elif self.algo == 'greedy':
+            p_one_better = self.greedy()
+        else:
+            raise ValueError('algorithm not available')
+
         self.rand_temp.uniform_()  # randomize action
         self.crt_act[self.rand_temp < p_one_better.unsqueeze(dim=1)] = 1
         self.crt_act[self.rand_temp > p_one_better.unsqueeze(dim=1)] = 0
@@ -82,6 +89,16 @@ class Bandit:
             p_one_better[p_one_better > 1-self.clip] = 1 - self.clip
         return p_one_better
 
+    def greedy(self):
+        if self.acu_mean.is_cuda:
+            # Todo
+            return
+        else:
+            p_one_better = torch.zeros(self.R)
+            p_one_better[self.acu_mean.argmax(dim=1) == 1] = 1 - self.clip
+            p_one_better[self.acu_mean.argmax(dim=1) == 0] = self.clip
+        return p_one_better
+
     def regular_est(self):
         total_rwd = torch.zeros((self.R, self.N, self.T))
         total_act = torch.zeros((self.R, self.N, self.T))
@@ -94,6 +111,9 @@ class Bandit:
             self.step()
             total_rwd[:, :, t] = self.crt_rwd
             total_act[:, :, t] = self.crt_act
+        if self.acu_mean.is_cuda:
+            self.acu_mean = self.acu_mean.cpu()
+            self.acu_obs = self.acu_obs.cpu()
         self.sigma_hat_square = ((total_rwd - total_act * self.acu_mean[:,1].reshape((self.R, 1, 1)) -
                                 (1 - total_act) * self.acu_mean[:, 0].reshape((self.R, 1, 1))) ** 2
                                  ).sum(dim=(1, 2)) / (self.T * self.N - 2)
@@ -106,24 +126,27 @@ class Bandit:
 # TODO cuda version
 
 
-myparams = {'N': 100, 'T': 25, 'R': 100000, 'mean_reward': [0, 0], 'var_reward': [1, 1],'clip': 0}
-mbit = Bandit(params=myparams,cuda_available=False)
+myparams = {'N': 100, 'T': 25, 'R': 50000, 'mean_reward': [0, 0], 'var_reward': [1, 1],
+            'clip': 0, 'algo': 'thompson'}
+mbit = Bandit(params=myparams,cuda_available=True)
 mbit.regular_est()
 mbit.first_step()
 mbit.step(1)
 mbit.thompson()
+
+
 start = time.perf_counter()
-mbit.first_step()
-mbit.thompson()
-# for i in range(100):
-#     np.random.normal(size=30000)
-#     # torch.randn.cuda(100000)
-#     # np.random.normal(size=100000)
+myparams = {'N': 100, 'T': 25, 'R': 100000, 'mean_reward': [0, 0], 'var_reward': [1, 1],
+            'clip': 0, 'algo': 'thompson'}
+mbit = Bandit(params=myparams,cuda_available=True)
+mbit.regular_est()
 end = time.perf_counter()
 print(end-start)
+
 
 plt.hist(mbit.diff,density=True, bins=80)
 x_temp = np.arange(-4,4,0.02)
 y_temp = scipy.stats.norm.pdf(x_temp)
 plt.plot(x_temp,y_temp)
 plt.show()
+print("Type-1 error rate", (mbit.diff.abs()>scipy.stats.norm.ppf(q=1-0.05/2)).sum() /(0.0+mbit.R))
