@@ -29,7 +29,7 @@ class Bandit:
             self.acu_mean = torch.zeros((self.R, self.num_act_env), dtype=torch.float).cuda()
             # accumulate observation times for each action
             self.acu_obs = torch.zeros((self.R, self.num_act_env), dtype=torch.float).cuda()
-
+            self.p_one_better = torch.ones((self.R), dtype=torch.float).cuda() / self.num_act_env
         else:
             self.rand_temp = torch.zeros((self.R, self.N), dtype=torch.float)
             self.crt_rwd = torch.zeros((self.R, self.N), dtype=torch.float)
@@ -38,6 +38,7 @@ class Bandit:
             self.crt_act = -torch.ones((self.R, self.N), dtype=torch.int)
             self.acu_mean = torch.zeros((self.R, self.num_act_env), dtype=torch.float)
             self.acu_obs = torch.zeros((self.R, self.num_act_env), dtype=torch.float)
+            self.p_one_better = torch.ones((self.R), dtype=torch.float) / self.num_act_env
 
     def normal_rwd(self):
         # compute reward and update current mean estimation, obs time.
@@ -66,6 +67,7 @@ class Bandit:
         else:
             raise ValueError('algorithm not available')
 
+        self.p_one_better = p_one_better
         self.rand_temp.uniform_()  # randomize action
         self.crt_act[self.rand_temp < p_one_better.unsqueeze(dim=1)] = 1
         self.crt_act[self.rand_temp > p_one_better.unsqueeze(dim=1)] = 0
@@ -144,10 +146,78 @@ class Bandit:
             bols[:, t, 0] = (self.crt_rwd * (1 - crt_act_float)).sum(dim=1) / self.crt_obs[:, 0]
             sigma_hat_square_bols = ((self.crt_rwd - crt_act_float * bols[:, t, 1].unsqueeze(dim=1) -
                                       (1 - crt_act_float) * bols[:, t, 0].unsqueeze(dim=1)) ** 2).sum(dim=1) / (
-                                                self.N - 2)
+                                            self.N - 2)
             bols_est[:, t] = (bols[:, t, 1] - bols[:, t, 0]) * (self.crt_obs.prod(dim=1) / self.N /
                                                                 sigma_hat_square_bols).sqrt()
         test_stat = bols_est.mean(dim=1) * np.sqrt(self.T)
         self.bols = bols
         self.sigma = sigma_hat_square_bols
         return test_stat
+
+    def aw_aipw(self):
+        # TODO improve efficiency
+        total_select_prob = torch.zeros((self.R, self.T))
+        total_rwd = torch.zeros((self.R, self.N, self.T))
+        total_act = torch.zeros((self.R, self.N, self.T))
+        total_gamma = torch.zeros((self.R, self.T, self.num_act_env))
+        total_y1 = torch.zeros((self.R, self.N, self.T))
+        total_y0 = torch.zeros((self.R, self.N, self.T))
+        mu_hat = torch.zeros((self.R, self.num_act_env))
+        if self.acu_mean.is_cuda:
+            total_act = total_act.cuda()
+            total_rwd = total_rwd.cuda()
+            total_select_prob = total_select_prob.cuda()
+            total_gamma = total_gamma.cuda()
+            mu_hat = mu_hat.cuda()
+            total_y1 = total_y1.cuda()
+            total_y0 = total_y0.cuda()
+
+        self.total_select_prob = total_select_prob
+        self.total_rwd = total_rwd
+        self.total_act = total_act
+        self.total_gamma = total_gamma
+        self.mu_hat = mu_hat
+
+        t = 0
+        mu_hat[:, :] = self.acu_mean  # add mu hat
+        self.first_step()
+        crt_act_float = self.crt_act.type(torch.float)
+        total_select_prob[:, t] = self.p_one_better
+        total_rwd[:, :, t] = self.crt_rwd
+        total_act[:, :, t] = self.crt_act
+
+        total_gamma[:, t, 0] = (self.crt_rwd * (1 - crt_act_float)).sum(dim=1) / self.N / (1 - self.p_one_better) + (
+                1 - self.crt_obs[:, 1] / self.N / (1 - self.p_one_better)) * mu_hat[:, 0]
+        total_gamma[:, t, 1] = (self.crt_rwd * crt_act_float).sum(dim=1) / self.N / self.p_one_better + (
+                1 - self.crt_obs[:, 0] / self.N / self.p_one_better) * mu_hat[:, 1]
+        total_y1[:, :, t] = (self.crt_rwd * crt_act_float) / self.p_one_better.unsqueeze(dim=1) + \
+                            (1 - crt_act_float / self.p_one_better.unsqueeze(dim=1)) * mu_hat[:, 1].unsqueeze(dim=1)
+        total_y0[:, :, t] = (self.crt_rwd * (1-crt_act_float)) / (1-self.p_one_better).unsqueeze(dim=1) +\
+                            (1 - (1-crt_act_float) / (1-self.p_one_better).unsqueeze(dim=1)) * mu_hat[:,0].unsqueeze(dim=1)
+        for t in range(1, self.T):
+            mu_hat[:, :] = self.acu_mean  # add mu hat
+            self.step()
+            crt_act_float = self.crt_act.type(torch.float)
+            total_select_prob[:, t] = self.p_one_better
+            total_rwd[:, :, t] = self.crt_rwd
+            total_act[:, :, t] = self.crt_act
+
+            total_gamma[:, t, 0] = (self.crt_rwd * (1 - crt_act_float)).sum(dim=1) / self.N / (
+                    1 - self.p_one_better) + (1 - self.crt_obs[:, 0] / self.N / (1 - self.p_one_better)) * mu_hat[:, 0]
+            total_gamma[:, t, 1] = (self.crt_rwd * crt_act_float).sum(dim=1) / self.N / self.p_one_better + (
+                    1 - self.crt_obs[:, 1] / self.N / self.p_one_better) * mu_hat[:, 1]
+            total_y1[:, :, t] = (self.crt_rwd * crt_act_float) / self.p_one_better.unsqueeze(dim=1) + \
+                                (1 - crt_act_float / self.p_one_better.unsqueeze(dim=1)) * mu_hat[:, 1].unsqueeze(dim=1)
+            total_y0[:, :, t] = (self.crt_rwd * (1 - crt_act_float)) / (1 - self.p_one_better).unsqueeze(dim=1) + \
+                                (1 - (1 - crt_act_float) / (1 - self.p_one_better).unsqueeze(dim=1)) * mu_hat[:,0].unsqueeze(dim=1)
+        beta_1_hat = (total_select_prob.sqrt() * total_gamma[:, :, 1]).sum(dim=1) / (total_select_prob.sqrt().sum(dim=1))
+        beta_1_hat = (total_select_prob.sqrt() * total_gamma[:, :, 1]).sum(dim=1) / (
+            total_select_prob.sqrt().sum(dim=1))
+        beta_0_hat = (total_select_prob.sqrt() * total_gamma[:, :, 0]).sum(dim=1) / (
+            (1 - total_select_prob).sqrt().sum(dim=1))
+        self.v1_hat = (total_select_prob*((total_y1-beta_1_hat.reshape((self.R,1,1)))**2).sum(dim=1)).sum(dim=1)  / \
+                      (total_select_prob.sqrt().sum(dim=1) * self.N)**2
+        self.v0_hat = ((1 - total_select_prob)*((total_y0-beta_0_hat.reshape((self.R,1,1)))**2).sum(dim=1)).sum(dim=1)  / \
+                      ((1 - total_select_prob).sqrt().sum(dim=1) * self.N)**2
+        return beta_1_hat / self.v1_hat.sqrt()
+        # weight: sqrt(selection probability)
