@@ -9,14 +9,15 @@ total_R = 100000
 ite = 1
 sep_R = total_R // ite
 
-start = time.perf_counter()
 results = np.zeros(total_R)
-myparams = {'N': 25, 'T': 25, 'R': sep_R, 'mean_reward': [0, 0], 'var_reward': [1, 1],
-            'clip': 0.1, 'algo': 'thompson'}
+myparams = {'N': 25, 'T': 10, 'R': sep_R, 'mean_reward': [0, 0], 'var_reward': [1, 1],
+            'clip': 0.1, 'algo': 'greedy'}
+
+start = time.perf_counter()
 for i in range(ite):
     mbit = Bandit(params=myparams, cuda_available=True)
-    mbit.regular_est()
-    results[range(sep_R * i, (i+1) * sep_R)] = mbit.diff
+    est = mbit.regular_est().cpu()
+    results[range(sep_R * i, (i+1) * sep_R)] = est
 end = time.perf_counter()
 print(end-start)
 
@@ -25,4 +26,14 @@ x_temp = np.arange(-4,4,0.02)
 y_temp = scipy.stats.norm.pdf(x_temp)
 plt.plot(x_temp,y_temp)
 plt.show()
-print("Type-1 error rate", (results.__abs__() > scipy.stats.norm.ppf(q=1-0.05/2)).sum() / results.size)
+critical_value = scipy.stats.norm.ppf(q=1-0.05/2)
+# critical_value = scipy.stats.t.ppf(q=1-0.05/2,df=myparams['N']-2)
+print("Type-1 error rate", (results.__abs__() > critical_value).sum()/ results.size)
+
+
+
+plt.hist(mbit.bols[:,0,0].cpu().numpy(),density=True,bins=100)
+x_temp = np.arange(-4,4,0.02)
+y_temp = scipy.stats.norm.pdf(x_temp)
+plt.plot(x_temp,y_temp)
+plt.show()
