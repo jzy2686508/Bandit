@@ -32,8 +32,8 @@ print("Type-1 error rate", (results.__abs__() > critical_value).sum()/ results.s
 
 
 
-plt.hist(mbit.bols[:,0,0].cpu().numpy(),density=True,bins=100)
-x_temp = np.arange(-4,4,0.02)
-y_temp = scipy.stats.norm.pdf(x_temp)
-plt.plot(x_temp,y_temp)
-plt.show()
+# plt.hist(mbit.bols[:,0,0].cpu().numpy(),density=True,bins=100)
+# x_temp = np.arange(-4,4,0.02)
+# y_temp = scipy.stats.norm.pdf(x_temp)
+# plt.plot(x_temp,y_temp)
+# plt.show()

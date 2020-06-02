@@ -154,18 +154,17 @@ class Bandit:
         self.sigma = sigma_hat_square_bols
         return test_stat
 
+
+
+
     def aw_aipw(self):
         # TODO improve efficiency
-        total_select_prob = torch.zeros((self.R, self.T))
-        total_rwd = torch.zeros((self.R, self.N, self.T))
-        total_act = torch.zeros((self.R, self.N, self.T))
+        total_select_prob = torch.zeros((self.R, self.T, self.num_act_env))
         total_gamma = torch.zeros((self.R, self.T, self.num_act_env))
         total_y1 = torch.zeros((self.R, self.N, self.T))
         total_y0 = torch.zeros((self.R, self.N, self.T))
         mu_hat = torch.zeros((self.R, self.num_act_env))
         if self.acu_mean.is_cuda:
-            total_act = total_act.cuda()
-            total_rwd = total_rwd.cuda()
             total_select_prob = total_select_prob.cuda()
             total_gamma = total_gamma.cuda()
             mu_hat = mu_hat.cuda()
@@ -173,8 +172,6 @@ class Bandit:
             total_y0 = total_y0.cuda()
 
         self.total_select_prob = total_select_prob
-        self.total_rwd = total_rwd
-        self.total_act = total_act
         self.total_gamma = total_gamma
         self.mu_hat = mu_hat
 
@@ -182,9 +179,8 @@ class Bandit:
         mu_hat[:, :] = self.acu_mean  # add mu hat
         self.first_step()
         crt_act_float = self.crt_act.type(torch.float)
-        total_select_prob[:, t] = self.p_one_better
-        total_rwd[:, :, t] = self.crt_rwd
-        total_act[:, :, t] = self.crt_act
+        total_select_prob[:, t, 1] = self.p_one_better
+        total_select_prob[:, t, 0] = 1 - self.p_one_better
 
         total_gamma[:, t, 0] = (self.crt_rwd * (1 - crt_act_float)).sum(dim=1) / self.N / (1 - self.p_one_better) + (
                 1 - self.crt_obs[:, 1] / self.N / (1 - self.p_one_better)) * mu_hat[:, 0]
@@ -199,9 +195,6 @@ class Bandit:
             self.step()
             crt_act_float = self.crt_act.type(torch.float)
             total_select_prob[:, t] = self.p_one_better
-            total_rwd[:, :, t] = self.crt_rwd
-            total_act[:, :, t] = self.crt_act
-
             total_gamma[:, t, 0] = (self.crt_rwd * (1 - crt_act_float)).sum(dim=1) / self.N / (
                     1 - self.p_one_better) + (1 - self.crt_obs[:, 0] / self.N / (1 - self.p_one_better)) * mu_hat[:, 0]
             total_gamma[:, t, 1] = (self.crt_rwd * crt_act_float).sum(dim=1) / self.N / self.p_one_better + (
@@ -210,10 +203,9 @@ class Bandit:
                                 (1 - crt_act_float / self.p_one_better.unsqueeze(dim=1)) * mu_hat[:, 1].unsqueeze(dim=1)
             total_y0[:, :, t] = (self.crt_rwd * (1 - crt_act_float)) / (1 - self.p_one_better).unsqueeze(dim=1) + \
                                 (1 - (1 - crt_act_float) / (1 - self.p_one_better).unsqueeze(dim=1)) * mu_hat[:,0].unsqueeze(dim=1)
-        beta_1_hat = (total_select_prob.sqrt() * total_gamma[:, :, 1]).sum(dim=1) / (total_select_prob.sqrt().sum(dim=1))
-        beta_1_hat = (total_select_prob.sqrt() * total_gamma[:, :, 1]).sum(dim=1) / (
-            total_select_prob.sqrt().sum(dim=1))
-        beta_0_hat = (total_select_prob.sqrt() * total_gamma[:, :, 0]).sum(dim=1) / (
+        beta_1_hat = (total_select_prob.sqrt().unsqueeze(dim=1) * total_y1).sum(dim=(1,2))/ total_select_prob.sqrt().sum(dim=1) / self.N
+        beta_0_hat = ()
+        beta_0_hat = ((1-total_select_prob).sqrt() * total_gamma[:, :, 0]).sum(dim=1) / (
             (1 - total_select_prob).sqrt().sum(dim=1))
         self.v1_hat = (total_select_prob*((total_y1-beta_1_hat.reshape((self.R,1,1)))**2).sum(dim=1)).sum(dim=1)  / \
                       (total_select_prob.sqrt().sum(dim=1) * self.N)**2
