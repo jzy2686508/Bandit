@@ -9,7 +9,7 @@ class Bandit:
         # N: batch size; T: batch number; R: replication number; clip: clip probability
         if params is None:
             params = {'N': 15, 'T': 25, 'R': 10000, 'mean_reward': [0, 0], 'var_reward': [1, 1],
-                      'clip': 0.1, 'algo': 'thompson'}
+                      'clip': 0.1, 'algo': 'thompson', 'rwdtype': 'normal'}
         self.N = params['N']
         self.T = params['T']
         self.R = params['R']
@@ -18,6 +18,7 @@ class Bandit:
         self.mean_rwd_env = torch.tensor(params['mean_reward'], dtype=torch.float)
         self.var_rwd_env = torch.tensor(params['var_reward'], dtype=torch.float)
         self.num_act_env = len(self.mean_rwd_env)
+        self.is_uniform = (params['rwdtype']=='uniform')
         if cuda_available:
             # temp variable for generating random variable
             self.rand_temp = torch.zeros((self.R, self.N), dtype=torch.float).cuda()
@@ -40,16 +41,26 @@ class Bandit:
             self.acu_obs = torch.zeros((self.R, self.num_act_env), dtype=torch.float)
             self.p_one_better = torch.ones((self.R), dtype=torch.float) / self.num_act_env
 
-    def normal_rwd(self):
+    def normal_rwd(self, uniform=False):
         # compute reward and update current mean estimation, obs time.
-        for a in range(self.num_act_env):
-            self.crt_rwd[self.crt_act == a] = self.rand_temp[self.crt_act == a].normal_(
-                mean=self.mean_rwd_env[a], std=self.var_rwd_env[a].sqrt())
-            self.crt_obs[:, a] = (self.crt_act == a).sum(dim=1)
-            self.acu_mean[:, a] = ((self.crt_rwd * (self.crt_act == a).type(torch.float)).sum(
-                dim=1) + self.acu_mean[:, a] * self.acu_obs[:, a]) / (
-                                          self.crt_obs[:, a] + self.acu_obs[:, a])
-        self.acu_obs += self.crt_obs
+        # Uniform [0,1]
+        if uniform:
+            for a in range(self.num_act_env):
+                self.crt_rwd[self.crt_act == a] = self.rand_temp[self.crt_act == a].uniform_()
+                self.crt_obs[:, a] = (self.crt_act == a).sum(dim=1)
+                self.acu_mean[:, a] = ((self.crt_rwd * (self.crt_act == a).type(torch.float)).sum(
+                    dim=1) + self.acu_mean[:, a] * self.acu_obs[:, a]) / (
+                                              self.crt_obs[:, a] + self.acu_obs[:, a])
+            self.acu_obs += self.crt_obs
+        else:
+            for a in range(self.num_act_env):
+                self.crt_rwd[self.crt_act == a] = self.rand_temp[self.crt_act == a].normal_(
+                    mean=self.mean_rwd_env[a], std=self.var_rwd_env[a].sqrt())
+                self.crt_obs[:, a] = (self.crt_act == a).sum(dim=1)
+                self.acu_mean[:, a] = ((self.crt_rwd * (self.crt_act == a).type(torch.float)).sum(
+                    dim=1) + self.acu_mean[:, a] * self.acu_obs[:, a]) / (
+                                              self.crt_obs[:, a] + self.acu_obs[:, a])
+            self.acu_obs += self.crt_obs
 
     def first_step(self):
         self.rand_temp.uniform_(to=self.num_act_env)  # randomize action
@@ -57,7 +68,7 @@ class Bandit:
         # avoid non assignment; Only works for two arms.
         self.crt_act[(self.crt_act.sum(dim=1) == 0), 0] = 1
         self.crt_act[(self.crt_act.sum(dim=1) == self.N), 0] = 0
-        self.normal_rwd()
+        self.normal_rwd(uniform=self.is_uniform)
 
     def step(self):
         if self.algo == 'thompson':
@@ -73,7 +84,7 @@ class Bandit:
         self.crt_act[self.rand_temp > p_one_better.unsqueeze(dim=1)] = 0
         self.crt_act[(self.crt_act.sum(dim=1) == 0), 0] = 1
         self.crt_act[(self.crt_act.sum(dim=1) == self.N), 0] = 0
-        self.normal_rwd()
+        self.normal_rwd(uniform=self.is_uniform)
 
     def thompson(self):
         # only work for 2 arm bandit
@@ -121,15 +132,18 @@ class Bandit:
                              (1 - total_act) * self.acu_mean[:, 0].reshape((self.R, 1, 1))) ** 2
                             ).sum(dim=(1, 2)) / (self.T * self.N - 2)
         # self.sigma_hat_square[:] = 1 #known variance
+        self.sigma = sigma_hat_square
         return (self.acu_mean[:, 1] - self.acu_mean[:, 0]) / sigma_hat_square.sqrt() / (
                 1 / self.acu_obs).sum(dim=1).sqrt()
 
     def batched_ols(self):
         bols = torch.zeros((self.R, self.T, self.num_act_env))
         bols_est = torch.zeros((self.R, self.T))
+        H = torch.ones((self.R, self.T))
         if self.acu_mean.is_cuda:
             bols = bols.cuda()
             bols_est = bols_est.cuda()
+            H = H.cuda()
         self.first_step()
         t = 0
         crt_act_float = self.crt_act.type(torch.float)
@@ -139,6 +153,10 @@ class Bandit:
                                   bols[:, t, 0].unsqueeze(dim=1)) ** 2).sum(dim=1) / (self.N - 2)
         bols_est[:, t] = (bols[:, t, 1] - bols[:, t, 0]) * (self.crt_obs.prod(dim=1) / self.N /
                                                             sigma_hat_square_bols).sqrt()
+        # greedy
+        H[:, t] = (self.p_one_better * (1 - self.p_one_better)).sqrt() / (
+                (self.p_one_better * (1 - self.p_one_better)).sqrt() + (self.T-1) * np.sqrt(self.clip * (1 - self.clip)))
+        # thompson
         for t in range(1, self.T):
             self.step()
             crt_act_float = self.crt_act.type(torch.float)
@@ -149,13 +167,18 @@ class Bandit:
                                             self.N - 2)
             bols_est[:, t] = (bols[:, t, 1] - bols[:, t, 0]) * (self.crt_obs.prod(dim=1) / self.N /
                                                                 sigma_hat_square_bols).sqrt()
+            # greedy
+            H[:, t] = np.sqrt(self.clip * (1 - self.clip)) / (
+              (self.p_one_better * (1 - self.p_one_better)).sqrt() + (self.T-1) * np.sqrt(self.clip * (1 - self.clip)))
+
         test_stat = bols_est.mean(dim=1) * np.sqrt(self.T)
-        self.bols = bols
+        self.bols_est = bols_est
         self.sigma = sigma_hat_square_bols
+        self.result_weight = (bols_est * H).sum(dim=1) / H.norm(dim=1)
+        self.H = H
         return test_stat
 
     def aw_aipw(self):
-        # TODO improve efficiency
         total_select_prob = torch.zeros((self.R, self.T, self.num_act_env))
         total_y1 = torch.zeros((self.R, self.N, self.T))
         total_y0 = torch.zeros((self.R, self.N, self.T))
@@ -171,6 +194,7 @@ class Bandit:
 
         t = 0
         mu_hat[:, :] = self.acu_mean  # add mu hat
+        mu_hat += 0
         self.first_step()
         crt_act_float = self.crt_act.type(torch.float)
         total_select_prob[:, t, 1] = self.p_one_better
@@ -182,6 +206,7 @@ class Bandit:
                                                                                                    0].unsqueeze(dim=1)
         for t in range(1, self.T):
             mu_hat[:, :] = self.acu_mean  # add mu hat
+            mu_hat += 0
             self.step()
             crt_act_float = self.crt_act.type(torch.float)
             total_select_prob[:, t, 1] = self.p_one_better
@@ -210,6 +235,8 @@ class Bandit:
         self.cov01_hat = cov01_hat
         self.v0_hat = v0_hat
         self.v1_hat = v1_hat
+        self.beta1 = beta_1_hat
+        self.beta0 = beta_0_hat
         diff_est = (beta_1_hat - beta_0_hat) / (v0_hat + v1_hat - 2 * cov01_hat).sqrt()
         return diff_est
         # weight: sqrt(selection probability)

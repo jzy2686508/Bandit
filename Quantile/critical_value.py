@@ -16,5 +16,5 @@ for i in range(30,100):
     print(i)
     for j in range(3,30):
         quantile[i,j,:] = compute_t_critical(i,j)
-    np.save('Quantile/quantile.npy', quantile)
+    np.save('quantile_standardized_t/quantile.npy', quantile)
 
