@@ -12,7 +12,7 @@ critical_value = scipy.stats.norm.ppf(q=1-0.05/2)
 
 
 torch.cuda.set_device(2)
-total_R = 300000
+total_R = 200000
 ite = 1
 sep_R = total_R // ite
 results = np.zeros(total_R)
@@ -22,13 +22,13 @@ def type1(results):
 
     type1error = "Type-1 error / power:\n" + str((results.__abs__() > critical_value).sum() / results.size)
     print(type1error)
-    if algo == 'greedy':
-        type1error_ecv = "Type-1 error / power with empirical cutoff:\n" + str(
-            (results.__abs__() > ecv_OLS_greedy[N, T, 9]).sum() / results.size)
-    elif algo == 'thompson':
-        type1error_ecv = "Type-1 error / power with empirical cutoff:\n" + str(
-            (results.__abs__() > ecv_OLS_thompson[N, T, 9]).sum() / results.size)
-    print(type1error_ecv)
+    # if algo == 'greedy':
+    #     type1error_ecv = "Type-1 error / power with empirical cutoff:\n" + str(
+    #         (results.__abs__() > ecv_OLS_greedy[N, T, 9]).sum() / results.size)
+    # elif algo == 'thompson':
+    #     type1error_ecv = "Type-1 error / power with empirical cutoff:\n" + str(
+    #         (results.__abs__() > ecv_OLS_thompson[N, T, 9]).sum() / results.size)
+    # print(type1error_ecv)
 
     # plot distribution
     f = plt.figure()
@@ -40,11 +40,10 @@ def type1(results):
     plt.plot(x_temp, y_temp, label='Standard Normal')
     plt.title(str_label)
     plt.legend()
-    plt.show()
     return f
 
 N = 25
-T = 1
+T = 25
 rwdtype = 'normal'
 est_method = 'OLS'  # 'AW', 'BOLS', 'OLS'
 algo = 'thompson'
@@ -64,3 +63,4 @@ end = time.perf_counter()
 print(end-start)
 
 f1 = type1(results)
+f1.show()
