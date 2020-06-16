@@ -14,7 +14,7 @@ critical_value = scipy.stats.norm.ppf(q=1-0.05/2)
 
 
 torch.cuda.set_device(1)
-total_R = 10000
+total_R = 100000
 ite = 1
 sep_R = total_R // ite
 results = np.zeros(total_R)
@@ -51,12 +51,11 @@ T = 15
 rwdtype = 'normal'
 est_method = 'BOLS'  # 'AW', 'BOLS', 'OLS'
 algo = 'thompson'
-myparams = {'N': N, 'T': T, 'R': sep_R, 'mean_reward': [0, 0.5], 'var_reward': [1, 1],
-            'clip': 0.05, 'algo': algo, 'rwdtype': rwdtype}
+myparams = {'N': N, 'T': T, 'R': sep_R, 'mean_reward': [0, 0.25], 'var_reward': [1, 1],
+            'clip': 0.1, 'algo': algo, 'rwdtype': rwdtype}
 start = time.perf_counter()
 for i in range(ite):
     mbit = Bandit(params=myparams, cuda_available=True)
-    mbit.cpt_exp(0,0.25)
     if est_method=='AW':
         est = mbit.aw_aipw().cpu()
     elif est_method=='BOLS':
@@ -68,11 +67,13 @@ for i in range(ite):
 end = time.perf_counter()
 print(end-start)
 
+best_wt = mbit.total_prob.prod(dim=2).sqrt()
+best_wt = best_wt / best_wt.sum(dim=1).unsqueeze(dim=1)
 f1 = type1(results)
-# f1.show()
+f1.show()
 print("***************************************************************")
 f2 = type1(results2)
-# f2.show()
+f2.show()
 #
 # for N in [25]:
 #     for T in [5,10,15,20,25]:

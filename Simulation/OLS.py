@@ -11,8 +11,8 @@ ecv_OLS_thompson = np.load('../Quantile/empirical_quantile_normal/OLS_thompson.n
 critical_value = scipy.stats.norm.ppf(q=1-0.05/2)
 
 
-torch.cuda.set_device(2)
-total_R = 200000
+torch.cuda.set_device(3)
+total_R = 100000
 ite = 1
 sep_R = total_R // ite
 results = np.zeros(total_R)
@@ -42,11 +42,11 @@ def type1(results):
     plt.legend()
     return f
 
-N = 25
+N = 100
 T = 25
 rwdtype = 'normal'
 est_method = 'OLS'  # 'AW', 'BOLS', 'OLS'
-algo = 'thompson'
+algo = 'greedy'
 myparams = {'N': N, 'T': T, 'R': sep_R, 'mean_reward': [0, 0], 'var_reward': [1, 1],
             'clip': 0.1, 'algo': algo, 'rwdtype': rwdtype}
 start = time.perf_counter()

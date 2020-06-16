@@ -6,8 +6,7 @@ import scipy.stats
 from Bandit_env.Bandit_env import Bandit
 
 
-ecv_AW_greedy = np.load('../Quantile/empirical_quantile_normal/AW_greedy.npy')
-ecv_AW_thompson = np.load('../Quantile/empirical_quantile_normal/AW_thompson.npy')
+
 critical_value = scipy.stats.norm.ppf(q=1-0.05/2)
 
 torch.cuda.set_device(3)
@@ -45,19 +44,14 @@ def type1(results,N,T):
 N = 15
 T = 15
 rwdtype = 'normal'
-est_method = 'AW'  # 'AW', 'BOLS', 'OLS'
 algo = 'thompson'
+est_method = 'AW-DIFF'
 myparams = {'N': N, 'T': T, 'R': sep_R, 'mean_reward': [10, 10.25], 'var_reward': [1, 1],
             'clip': 0.1, 'algo': algo, 'rwdtype': rwdtype}
 start = time.perf_counter()
 for i in range(ite):
     mbit = Bandit(params=myparams, cuda_available=True)
-    if est_method=='AW':
-        est = mbit.aw_aipw().cpu()
-    elif est_method=='BOLS':
-        est = mbit.batched_ols().cpu()
-    elif est_method=='OLS':
-        est = mbit.regular_est().cpu()
+    est = mbit.aw_diff().cpu().numpy()
     results[range(sep_R * i, (i+1) * sep_R)] = est
 end = time.perf_counter()
 print(end-start)
